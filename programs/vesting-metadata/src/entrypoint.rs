@@ -17,9 +17,9 @@ const DELETE: u8 = 3;
 
 const IX_AUTH: usize = 0;
 const IX_VAULT: usize = PK_LEN;
-const IX_POOL: usize = IXIDX_VAULT + PK_LEN;
-const IX_DURATION: usize = IXIDX_POOL + PK_LEN;
-const IX_APR: usize = IXIDX_DURATION + 8;
+const IX_POOL: usize = IX_VAULT + PK_LEN;
+const IX_DURATION: usize = IX_POOL + PK_LEN;
+const IX_APR: usize = IX_DURATION + 8;
 
 pub fn entrypoint(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     msg!("Entrypoint: Vesting Metadata");
@@ -158,29 +158,20 @@ pub struct EndpointCtx {
 }
 
 /// Endpoints
-pub fn create(
-    program_id: &Pubkey,
-    tx_auth: &Pubkey,
-    metadata: &Pubkey,
-    authority: &Pubkey,
-    vault: &Pubkey,
-    pool: &Pubkey,
-    duration: u64,
-    apr: u64,
-) -> Result<Instruction, ProgramError> {
+pub fn create(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
     msg!("Vesting Metadata: Create");
 
-    let accounts = [
-        AccountMeta::new(tx_auth, true),
-        AccountMeta::new(metadata, false),
+    let accounts = vec![
+        AccountMeta::new(ctx.tx_auth, true),
+        AccountMeta::new(ctx.metadata, false),
     ];
 
-    let data = MetadataInstruction {
-        authority,
-        vault,
-        pool,
-        duration,
-        apr,
+    let data = MetadataInstruction::Create {
+        authority: ctx.authority,
+        vault: ctx.vault,
+        pool: ctx.pool,
+        duration: ctx.duration,
+        apr: ctx.apr,
     }
     .pack();
 
@@ -191,13 +182,73 @@ pub fn create(
     })
 }
 
-pub fn read(
-    program_id: &Pubkey,
-    tx_auth: &Pubkey,
-    metadata: &Pubkey,
-    authority: &Pubkey,
-    vault: &Pubkey,
-    pool: &Pubkey,
-    duration: u64,
-    apr: u64,
-) -> 
+pub fn read(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
+    msg!("Vesting Metadata: Read");
+    let accounts = vec![
+        AccountMeta::new(ctx.tx_auth, true),
+        AccountMeta::new(ctx.metadata, false),
+    ];
+
+    let data = MetadataInstruction::Read {
+        authority: ctx.authority,
+        vault: ctx.vault,
+        pool: ctx.pool,
+        duration: ctx.duration,
+        apr: ctx.apr,
+    }
+    .pack();
+
+    Ok(Instruction {
+        program_id,
+        accounts,
+        data,
+    })
+}
+
+pub fn update(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
+    msg!("Vesting Metadata: Update");
+
+    let accounts = vec![
+        AccountMeta::new(ctx.tx_auth, true),
+        AccountMeta::new(ctx.metadata, false),
+    ];
+
+    let data = MetadataInstruction::Update {
+        authority: ctx.authority,
+        vault: ctx.vault,
+        pool: ctx.pool,
+        duration: ctx.duration,
+        apr: ctx.apr,
+    }
+    .pack();
+
+    Ok(Instruction {
+        program_id,
+        accounts,
+        data,
+    })
+}
+
+pub fn delete(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
+    msg!("Vesting Metadata: Delete");
+
+    let accounts = vec![
+        AccountMeta::new(ctx.tx_auth, true),
+        AccountMeta::new(ctx.metadata, false),
+    ];
+
+    let data = MetadataInstruction::Read {
+        authority: ctx.authority,
+        vault: ctx.vault,
+        pool: ctx.pool,
+        duration: ctx.duration,
+        apr: ctx.apr,
+    }
+    .pack();
+
+    Ok(Instruction {
+        program_id,
+        accounts,
+        data,
+    })
+}
