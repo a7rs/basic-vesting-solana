@@ -21,6 +21,14 @@ const IX_POOL: usize = IX_VAULT + PK_LEN;
 const IX_DURATION: usize = IX_POOL + PK_LEN;
 const IX_APR: usize = IX_DURATION + 8;
 
+/// State Constants
+const IS_INIT: usize = 0;
+const AUTH: usize = 1;
+const VAULT: usize = AUTH + PK_LEN;
+const POOL: usize = VAULT + PK_LEN;
+const DURA: usize = POOL + PK_LEN;
+const APR: usize = DURA + PK_LEN;
+
 pub fn entrypoint(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     msg!("Entrypoint: Vesting Metadata");
 
@@ -251,4 +259,56 @@ pub fn delete(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         accounts,
         data,
     })
+}
+
+pub struct MetadataState {
+    pub is_initialized: bool,
+    pub authority: Pubkey,
+    pub vault: Pubkey,
+    pub pool: Pubkey,
+    pub duration: u64,
+    pub apr: u64,
+}
+
+impl IsInitialized for MetadataState {
+    fn is_initialized(&self) -> bool {}
+}
+
+impl Sealed for MetadataState {}
+
+impl Pack for MetadataState {
+    const LEN: usize = 111;
+
+    fn pack_into_slice(&self, dst: &mut [u8]) {
+        dst[IS_INIT] = self.is_initialized as u8;
+        dst[AUTH..VAULT].copy_from_slice(self.authority.as_ref());
+        dst[VAULT..POOL].copy_from_slice(self.vault.as_ref());
+        dst[POOL..DURA].copy_from_slice(self.pool.as_ref());
+        dst[DURA..APR].copy_from_slice(self.duration.to_le_bytes());
+        dst[APR..].copy_from_slice(self.apr.to_le_bytes());
+    }
+
+    fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
+        let is_initialized = match src[IS_INIT] {
+            0 => false,
+            1 => true,
+            _ => unreachable!(),
+        };
+
+        let authority = Pubkey::new_from_array(src[AUTH..VAULT].try_into().unwrap());
+        let vault = Pubkey::new_from_array(src[VAULT..POOL].try_into().unwrap());
+        let pool = Pubkey::new_from_array(src[POOL..DURA].try_into().unwrap());
+        let duration = u64::from_le_bytes(src[DURA..APR].try_into().unwrap());
+        let apr = u64::from_le_bytes(src[APR..]).try_into().unwrap());
+            
+
+        Ok(Self {
+            is_initialized,
+            authority,
+            vault,
+            pool,
+            duration,
+            apr,
+        })
+    }
 }
