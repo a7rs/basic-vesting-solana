@@ -1,4 +1,3 @@
-
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     msg,
@@ -6,24 +5,57 @@ use solana_program::{
     pubkey::Pubkey,
 };
 
-use crate::error::LockupError::InvalidInstruction;
+use crate::error::ErrorCode::InvalidInstruction;
 use std::{convert::TryInto, mem::size_of};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum LockupInstruction {
+pub enum VestingInstruction {
 
-    /// Accounts Expected:
+    /// Convenience function for creating vesting account
     ///
-    /// `[w,s]` Authority 
-    New,
+    /// Accounts expected: 
+    /// `[s,w]` Authority
+    /// `[w]` Vesting Account
+    /// `[]` System Program
+    Init,
+
+    /// Accounts expected:
+    ///
+    /// `[s,w]` Authority 
+    /// `[w]` Vesting Account
+    /// `[w]` Vesting Token Vault
+    /// `[w]` SCY Staking Token Vault
+    /// `[]` Metadata Account
+    /// `[]` Token Program
+    CreateVesting {
+        amount: u64,
+    },
+
+    /// Accounts expected:
+    ///
+    /// `[s,w]` Authority
+    /// `[w]` Vesting Account
+    /// `[w]` Vesting Token Vault
+    /// `[w]` SCY Staking Token Vault
+    /// `[]` Metadata Account
+    /// `[]` Token Program
+    Withdraw {
+        amount: u64,
+    }
 
     /// Accounts Expected:
     ///
     /// `[w,s]` Authority
-    SetAuthority {
-        new_authority: Pubkey,
+    ChangeBeneficiary {
+        new_beneficiary: Pubkey,
     },
 
+    /// Accounts expected:
+    ///
+    /// `[s,w]` Authority
+    ChangeAuthority {
+        new_authority: Pubkey,
+    },
 }
 
 impl LockupInstruction {
@@ -67,67 +99,6 @@ impl LockupInstruction {
             _ => return Err(ProgramError::InvalidArgument)
         })
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum VestingInstruction {
-    /// Accounts Expected:
-    /// `[]`  Vesting
-    /// `[w]` Vault
-    /// `[w]` Depositor
-    /// `[s]` Depositor Authority
-    /// `[]`  Token Program
-    /// `[]`  Rent
-    /// `[]`  Clock
-    CreateVesting {
-        beneficiary: Pubkey,
-        deposit_amount: u64,
-        nonce: u8,
-        start_ts: i64,
-        end_ts: i64,
-        period_count: u64,
-        //realizor: Option<Realizor>,
-    },
-
-    /// This instruction is for withdrawing from whitelisted programs
-    /// Accounts Expected:
-    ///
-    /// `[w]` Vesting
-    /// `[s]` Beneficiary
-    /// `[w]` Vault
-    /// `[]`  Vesting Signer
-    /// `[w]` Receiving Token Account
-    /// `[]`  Token Program
-    /// `[]`  Clock
-    Withdraw {
-        amount: u64,
-    }
-
-    /// Accounts Expected:
-    ///
-    /// `[w]` Vesting
-    /// `[w]` Vault
-    /// `[s]` Vesting Signer
-    /// `[]`  Token Program
-    /// `[w]` Whitelisted Program Vault
-    /// `[s]` Whitelisted Program Vault Authority
-    WhitelistWithdraw {
-        amount: u64,
-    }
-
-    /// Accounts Expected:
-    ///
-    WhitelistDeposit {
-        cpi_instruction: Vec<u8>,
-        amount: u64,
-    }
-
-    /// Convenience instruction for UI's to calculate the withdrawable amount.
-    /// Accounts Expected:
-    ///
-    /// `[]` Vesting
-    /// `[]` Clock
-    AvailableForWithdrawl, 
 }
 
 impl VestingInstruction {
@@ -240,7 +211,6 @@ pub fn create_vesting(
     start_ts: u64,
     end_ts: u64,
     period_count: u64,
-    //realizor: Option<Realizor>,
 ) -> Result<Instruction, ProgramError> {
     msg!("SCY Lockup Call: CreateVesting");
     let accounts = vec![
@@ -298,40 +268,7 @@ pub fn withdraw(
         data,
     })
 }
-
-pub fn whitelist_withdraw(
-    program_id: Pubkey,
-    vesting: Pubkey,
-    vault: Pubkey,
-    vesting_signer: Pubkey,
-    token_program: Pubkey,
-    whitelisted_program_vault: Pubkey,
-    whitelisted_program_vault_authority: Pubkey,
-    amount: u64,
-) -> Result<Instruction, ProgramError> {
-    msg!("SCY Lockup Call: WhitelistWithdraw");
-    let accounts = vec![
-        AccountMeta::new(vesting, false),
-        AccountMeta::new(vault, false),
-        AccountMeta::new(vesting_signer, true),
-        AccountMeta::new_readonly(token_program, false),
-        AccountMeta::new(whitelisted_program_vault, false),
-        AccountMeta::new(whitelisted_program_vault_authority, true),
-    ];
-
-    let data = VestingInstruction::WhitelistWithdraw { amount }.pack();
-
-    Ok(Instruction {
-        program_id,
-        accounts,
-        data,
-    })
-}
-
-/*
-pub fn whitelist_deposit(
-    program_id: Pubkey,
-*/    
+   
 
 pub fn available_for_withdrawal(
     program_id: Pubkey,

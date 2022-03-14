@@ -1,0 +1,13 @@
+program_id: "SCYvenWuwx6Mp8aMW6REidxEoRAo1nSSrBYScKMUGca"
+mint: "SCYfrGCw8aDiqdgcpdGjV6jp4UVVQLuphxTDLNWu36f"
+mint_decimals: 9
+execution_date: "2019-02-21T00:00:00"
+team_vesting_period: 3.0
+preseed_vesting_period: 2.0
+preseed_price: 0.0200
+seed_vesting_period: 2.0
+seed_price: 0.02200
+p1_vesting_period: 1.75
+p1_price: 0.02840
+p2_vesting_period: 1.5
+p2_price: 0.03500

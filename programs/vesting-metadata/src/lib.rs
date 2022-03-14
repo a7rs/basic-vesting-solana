@@ -18,6 +18,8 @@ const IX_VAULT: usize = PK_LEN;
 const IX_POOL: usize = IX_VAULT + PK_LEN;
 const IX_DURATION: usize = IX_POOL + PK_LEN;
 const IX_APR: usize = IX_DURATION + 8;
+const IX_WTL: usize = IX_APR + 8;
+const IX_FEE: usize = IX_WTL + 8;
 
 /// State Constants
 const IS_INIT: usize = 0;
@@ -25,7 +27,9 @@ const AUTH: usize = 1;
 const VAULT: usize = AUTH + PK_LEN;
 const POOL: usize = VAULT + PK_LEN;
 const DURA: usize = POOL + PK_LEN;
-const APR: usize = DURA + PK_LEN;
+const APR: usize = DURA + 8;
+const WTL: usize = APR + 8;
+const FEE: usize = WTL + 8;
 
 pub fn entrypoint(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     msg!("Entrypoint: Vesting Metadata");
@@ -48,6 +52,10 @@ pub struct IxCtx {
     duration: u64,
     /// the percentage of interest generated over 12 months
     apr: u64,
+    ///
+    withdrawal_timelock: u64,
+    ///
+    early_withdrawal_fee: u64,
 }
 
 impl IxCtx {
@@ -58,6 +66,8 @@ impl IxCtx {
         buf.extend_from_slice(self.pool.as_ref());
         buf.extend_from_slice(self.duration.to_le_bytes());
         buf.extend_from_slice(self.apr.to_le_bytes());
+        buf.extend_from_slice(self.withdrawal_timelock.to_le_bytes());
+        buf.extend_from_slice(self.early_withdrawal_fee.to_le_bytes());
         buf
     }
 
@@ -87,7 +97,19 @@ impl IxCtx {
             .ok_or(InvalidInstruction)?;
 
         let apr = data
-            .get(IX_APR..)
+            .get(IX_APR..IX_WTL)
+            .and_then(|s| s.try_into().ok())
+            .map(u64::from_le_bytes)
+            .ok_or(InvalidInstruction)?;
+
+        let withdrawal_timelock = data
+            .get(IX_WTL..IX_FEE)
+            .and_then(|s| s.try_into().ok())
+            .map(u64::from_le_bytes)
+            .ok_or(InvalidInstruction)?;
+
+        let early_withdrawal_fee = data
+            .get(IX_FEE..)
             .and_then(|s| s.try_into().ok())
             .map(u64::from_le_bytes)
             .ok_or(InvalidInstruction)?;
@@ -98,6 +120,8 @@ impl IxCtx {
             pool,
             duration,
             apr,
+            withdrawal_timelock,
+            early_withdrawal_fee,
         })
     }
 }
@@ -161,6 +185,8 @@ pub struct EndpointCtx {
     pool: &Pubkey,
     duration: u64,
     apr: u64,
+    withdrawal_timelock: u64,
+    early_withdrawal_fee: u64,
 }
 
 /// Endpoints
@@ -178,6 +204,8 @@ pub fn create(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
+        withdrawal_timelock: ctx.withdrawal_timelock,
+        early_withdrawal_fee: ctx.early_withdrawal_fee,
     }
     .pack();
 
@@ -201,6 +229,8 @@ pub fn read(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
+        withdrawal_timelock: ctx.withdrawal_timelock,
+        early_withdrawal_fee: ctx.early_withdrawal_fee,
     }
     .pack();
 
@@ -225,6 +255,8 @@ pub fn update(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
+        withdrawal_timelock: ctx.withdrawal_timelock,
+        early_withdrawal_fee: ctx.early_withdrawal_fee,
     }
     .pack();
 
@@ -249,6 +281,8 @@ pub fn delete(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
+        withdrawal_timelock: ctx.withdrawal_timelock,
+        early_withdrawal_fee: ctx.early_withdrawal_fee,
     }
     .pack();
 
@@ -266,6 +300,8 @@ pub struct MetadataState {
     pub pool: Pubkey,
     pub duration: u64,
     pub apr: u64,
+    pub withdrawal_timelock: u64,
+    pub early_withdrawal_fee: u64,
 }
 
 impl IsInitialized for MetadataState {
@@ -274,7 +310,7 @@ impl IsInitialized for MetadataState {
     }
 }
 
-impl Sealed for MetadataState {}
+impl Sealed for MetadataState;
 
 impl Pack for MetadataState {
     const LEN: usize = 111;
@@ -285,7 +321,9 @@ impl Pack for MetadataState {
         dst[VAULT..POOL].copy_from_slice(self.vault.as_ref());
         dst[POOL..DURA].copy_from_slice(self.pool.as_ref());
         dst[DURA..APR].copy_from_slice(self.duration.to_le_bytes());
-        dst[APR..].copy_from_slice(self.apr.to_le_bytes());
+        dst[APR..WTL].copy_from_slice(self.apr.to_le_bytes());
+        dst[WTL..FEE].copy_from_slice(self.withdrawal_timelock.to_le_bytes());
+        dst[FEE..].copy_from_slice(self.early_withdrawal_fee.to_le_bytes());
     }
 
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
@@ -299,7 +337,9 @@ impl Pack for MetadataState {
         let vault = Pubkey::new_from_array(src[VAULT..POOL].try_into().unwrap());
         let pool = Pubkey::new_from_array(src[POOL..DURA].try_into().unwrap());
         let duration = u64::from_le_bytes(src[DURA..APR].try_into().unwrap());
-        let apr = u64::from_le_bytes(src[APR..]).try_into().unwrap());
+        let apr = u64::from_le_bytes(src[APR..WTL]).try_into().unwrap());
+        let withdrawal_timelock = u64::from_le_bytes(src[WTL..FEE].try_into().unwrap());
+        let early_withdrawal_fee = u64::from_le_bytes(src[FEE..].try_into().unwrap());
 
         Ok(Self {
             is_initialized,
@@ -308,11 +348,13 @@ impl Pack for MetadataState {
             pool,
             duration,
             apr,
+            withdrawal_timelock,
+            early_withdrawal_fee,
         })
     }
 }
 
-pub struct Processor {}
+pub struct Processor;
 
 impl Processor {
     pub fn process(
@@ -368,6 +410,8 @@ impl Processor {
             pool: ix_ctx.pool,
             duration: ix_ctx.duration,
             apr: ix_ctx.apr,
+            withdrawal_timelock: ix_ctx.withdrawal_timelock,
+            early_withdrawal_feel: ix_ctx.early_withdrawal_fee,
         }
 
         metadata.pack_into_slice(metadata_data);
@@ -400,6 +444,8 @@ impl Processor {
             pool: ix_ctx.pool,
             duration: ix_ctx.duration,
             apr: ix_ctx.apr,
+            withdrawal_timelock: ix_ctx.withdrawal_timelock,
+            early_withdrawal_fee: ix_ctx.early_withdrawal_fee,
         }
 
         metadata.pack_into_slice(metadata_data);
