@@ -9,9 +9,62 @@ import {
 	Transaction,
 	TransactionInstruction,
 	PublicKey,
-};
+} from '@solana/web3.js';
 
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+
+const U64SIZE: number = 8;
+
+export class Numberu64 extends BN {
+	toBuffer(): Buffer {
+		const a = super.toArray().reverse();
+		const b = Buffer.from(a);
+		if (b.length === U64SIZE) {
+			return b;
+		}
+		assert(b.length < U64SIZE, 'Numberu64 is limited to 8 bytes'); 
+		const zeroPad = Buffer.alloc(U64SIZE);
+		b.copy(zeroPad);
+		return zeroPad;
+	}
+
+	static fromBuffer(buffer: any): any {
+		assert(buffer.length === U64SIZE, `Invalid buffer length: ${buffer.length}`);
+		return new BN(
+			[...buffer]
+				.reverse()
+				.map(i => `00${i.toString(16)}`.slice(-2))
+				.join(''),
+			16s,
+		);
+	}
+}
+
+export class Numberu32 extends BN {
+  toBuffer(): Buffer {
+    const a = super.toArray().reverse();
+    const b = Buffer.from(a);
+    if (b.length === 4) {
+      return b;
+    }
+    assert(b.length < 4, 'Numberu32 too large');
+
+    const zeroPad = Buffer.alloc(4);
+    b.copy(zeroPad);
+    return zeroPad;
+  }
+
+  static fromBuffer(buffer: any): any {
+    assert(buffer.length === 4, `Invalid buffer length: ${buffer.length}`);
+    return new BN(
+      [...buffer]
+        .reverse()
+        .map(i => `00${i.toString(16)}`.slice(-2))
+        .join(''),
+      16,
+    );
+  }
+}
 
 interface MetadataEndpoint {
 	programId: PublicKey,
@@ -34,7 +87,7 @@ interface VestingEndpoint {
 	amount: Numberu64,
 }
 
-interface Accounts {
+interface AccountMeta {
 	pubkey: PublicKey,
 	isSigner: boolean,
 	isWritable: boolean,
@@ -42,7 +95,7 @@ interface Accounts {
 
 const unpackMetadataKeys = (
 	ctx: MetadataEndpoint,
-): Array<Accounts> => {
+): Array<AccountMeta> => {
 	const keys = [
 		{
 			pubkey: ctx.authority,
@@ -66,7 +119,7 @@ const unpackMetadataKeys = (
 
 const unpackVestingKeys = (
 	ctx: VestingEndpoint,
-): Array<Accounts> => {
+): Array<AccountMeta> => {
 	const keys = [
 		{
 			pubkey: ctx.authority,
@@ -105,7 +158,7 @@ export const createVestingMetadata = async (
 
 	return new TransactionInstruction({
 		keys,
-		programId,
+		programId: ctx.programId,
 		data: Buffer.from([]),
 	});
 };
@@ -117,7 +170,7 @@ export const readVestingMetadata = async (
 
 	return new TransactionInstruction({
 		keys,
-		programId,
+		programId: ctx.programId,
 		data: Buffer.from([]),
 	});
 };
@@ -129,7 +182,7 @@ export const updateVestingMetadata = async (
 
 	return new TransactionInstruction({
 		keys,
-		programId,
+		programId: ctx.programId,
 		data: Buffer.from([]),
 	});
 };
@@ -141,7 +194,7 @@ export const deleteVestingMetadata = async (
 
 	return new TransactionInstruction({
 		keys,
-		programId,
+		programId: ctx.programId,
 		data: Buffer.from([]),
 	});
 };
@@ -184,7 +237,7 @@ export const createNewVesting = async (
 
 	return new TransactionInstruction({
 		keys,
-		programId,
+		programId: ctx.programId,
 		data: Buffer.from([]),
 	});
 };
@@ -196,7 +249,7 @@ export const withdrawTokens = async (
 
 	return new TransactionInstruction({
 		keys,
-		programId,
+		programId: ctx.programId,
 		data: Buffer.from([]),
 	});
 };
@@ -249,7 +302,7 @@ export const signTransactionInstruction = async (
 ): Promise<string> => {
 	const tx = new Transaction();
 	tx.feePayer = feePayer;
-	tx.add(..txInstructions);
+	tx.add(...txInstructions);
 
 	return await connection.sendTransaction(tx, signers, {
 		preflightCommitment: 'single',

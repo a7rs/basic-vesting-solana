@@ -1,0 +1,10 @@
+{
+  "dependencies": {
+    "@solana/spl-token": "^0.2.0",
+    "@solana/web3.js": "^1.36.0",
+    "assert": "^2.0.0",
+    "bip32": "^3.0.1",
+    "bn.js": "^5.2.0",
+    "tweetnacl": "^1.0.3"
+  }
+}
