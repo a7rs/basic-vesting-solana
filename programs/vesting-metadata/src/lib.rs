@@ -48,8 +48,6 @@ pub struct IxCtx {
     authority: Pubkey,
     /// The token account for staked tokens
     vault: Pubkey,
-    /// Reward token account
-    pool: Pubkey,
     /// the amount of time required to elapse before rewards are fully realised
     duration: u64,
     /// the percentage of interest generated over 12 months
@@ -331,7 +329,6 @@ impl Pack for MetadataState {
             is_initialized,
             authority,
             vault,
-            pool,
             duration,
             apr,
             withdrawal_timelock,

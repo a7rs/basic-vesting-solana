@@ -23,8 +23,7 @@ pub enum VestingInstruction {
     ///
     /// `[s,w]` Authority 
     /// `[w]` Vesting Account
-    /// `[w]` Vesting Token Vault
-    /// `[w]` SCY Staking Token Vault
+    /// `[w]` Vault
     /// `[]` Metadata Account
     /// `[]` Token Program
     CreateVesting {
@@ -35,8 +34,7 @@ pub enum VestingInstruction {
     ///
     /// `[s,w]` Authority
     /// `[w]` Vesting Account
-    /// `[w]` Vesting Token Vault
-    /// `[w]` SCY Staking Token Vault
+    /// `[w]` Vault
     /// `[]` Metadata Account
     /// `[]` Token Program
     Withdraw {
