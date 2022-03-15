@@ -1,7 +1,11 @@
 use solana_program::{
-    account_info::AccountInfo, entrypoint, entrypoint::ProgramResult, msg,
-    program_error::PrintProgramError, pubkey::Pubkey,
+    account_info::AccountInfo, entrypoint, decode_error::DecodeError, entrypoint::ProgramResult, msg,
+    program_error::{PrintProgramError, ProgramError}, pubkey::Pubkey,
 };
+
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive as FromPrimitiveTrait;
+use thiserror::Error;
 
 declare_id!("");
 entrypoint!(entrypoint);
@@ -15,7 +19,6 @@ const DELETE: u8 = 3;
 
 const IX_AUTH: usize = 0;
 const IX_VAULT: usize = PK_LEN;
-const IX_POOL: usize = IX_VAULT + PK_LEN;
 const IX_DURATION: usize = IX_POOL + PK_LEN;
 const IX_APR: usize = IX_DURATION + 8;
 const IX_WTL: usize = IX_APR + 8;
@@ -25,8 +28,7 @@ const IX_FEE: usize = IX_WTL + 8;
 const IS_INIT: usize = 0;
 const AUTH: usize = 1;
 const VAULT: usize = AUTH + PK_LEN;
-const POOL: usize = VAULT + PK_LEN;
-const DURA: usize = POOL + PK_LEN;
+const DURA: usize = VAULT + PK_LEN;
 const APR: usize = DURA + 8;
 const WTL: usize = APR + 8;
 const FEE: usize = WTL + 8;
@@ -63,7 +65,6 @@ impl IxCtx {
         let mut buf = Vec::new(size_of::<Self>());
         buf.extend_from_slice(self.authority.as_ref());
         buf.extend_from_slice(self.vault.as_ref());
-        buf.extend_from_slice(self.pool.as_ref());
         buf.extend_from_slice(self.duration.to_le_bytes());
         buf.extend_from_slice(self.apr.to_le_bytes());
         buf.extend_from_slice(self.withdrawal_timelock.to_le_bytes());
@@ -79,13 +80,7 @@ impl IxCtx {
             .ok_or(InvalidInstruction)?;
 
         let vault = data
-            .get(IX_VAULT..IX_POOL)
-            .and_then(|s| s.try_into().ok())
-            .map(Pubkey::from_bytes)
-            .ok_or(InvalidInstruction)?;
-
-        let pool = data
-            .get(IX_POOL..IX_DURA)
+            .get(IX_VAULT..IX_DURA)
             .and_then(|s| s.try_into().ok())
             .map(Pubkey::from_bytes)
             .ok_or(InvalidInstruction)?;
@@ -117,7 +112,6 @@ impl IxCtx {
         Ok(Self {
             authority,
             vault,
-            pool,
             duration,
             apr,
             withdrawal_timelock,
@@ -182,7 +176,6 @@ pub struct EndpointCtx {
     metadata: &Pubkey,
     authority: &Pubkey,
     vault: &Pubkey,
-    pool: &Pubkey,
     duration: u64,
     apr: u64,
     withdrawal_timelock: u64,
@@ -201,7 +194,6 @@ pub fn create(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
     let data = MetadataInstruction::Create {
         authority: ctx.authority,
         vault: ctx.vault,
-        pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
@@ -226,7 +218,6 @@ pub fn read(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
     let data = MetadataInstruction::Read {
         authority: ctx.authority,
         vault: ctx.vault,
-        pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
@@ -252,7 +243,6 @@ pub fn update(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
     let data = MetadataInstruction::Update {
         authority: ctx.authority,
         vault: ctx.vault,
-        pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
@@ -278,7 +268,6 @@ pub fn delete(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
     let data = MetadataInstruction::Read {
         authority: ctx.authority,
         vault: ctx.vault,
-        pool: ctx.pool,
         duration: ctx.duration,
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
@@ -297,7 +286,6 @@ pub struct MetadataState {
     pub is_initialized: bool,
     pub authority: Pubkey,
     pub vault: Pubkey,
-    pub pool: Pubkey,
     pub duration: u64,
     pub apr: u64,
     pub withdrawal_timelock: u64,
@@ -318,8 +306,7 @@ impl Pack for MetadataState {
     fn pack_into_slice(&self, dst: &mut [u8]) {
         dst[IS_INIT] = self.is_initialized as u8;
         dst[AUTH..VAULT].copy_from_slice(self.authority.as_ref());
-        dst[VAULT..POOL].copy_from_slice(self.vault.as_ref());
-        dst[POOL..DURA].copy_from_slice(self.pool.as_ref());
+        dst[VAULT..DURA].copy_from_slice(self.vault.as_ref());
         dst[DURA..APR].copy_from_slice(self.duration.to_le_bytes());
         dst[APR..WTL].copy_from_slice(self.apr.to_le_bytes());
         dst[WTL..FEE].copy_from_slice(self.withdrawal_timelock.to_le_bytes());
@@ -334,8 +321,7 @@ impl Pack for MetadataState {
         };
 
         let authority = Pubkey::new_from_array(src[AUTH..VAULT].try_into().unwrap());
-        let vault = Pubkey::new_from_array(src[VAULT..POOL].try_into().unwrap());
-        let pool = Pubkey::new_from_array(src[POOL..DURA].try_into().unwrap());
+        let vault = Pubkey::new_from_array(src[VAULT..DURA].try_into().unwrap());
         let duration = u64::from_le_bytes(src[DURA..APR].try_into().unwrap());
         let apr = u64::from_le_bytes(src[APR..WTL]).try_into().unwrap());
         let withdrawal_timelock = u64::from_le_bytes(src[WTL..FEE].try_into().unwrap());
@@ -441,7 +427,6 @@ impl Processor {
             is_initialized: true,
             authority: ix_ctx.authority,
             vault: ix_ctx.vault,
-            pool: ix_ctx.pool,
             duration: ix_ctx.duration,
             apr: ix_ctx.apr,
             withdrawal_timelock: ix_ctx.withdrawal_timelock,
@@ -478,7 +463,34 @@ impl Processor {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Error, FromPrimitive, PartialEq)]
 pub enum ErrorCode {
+    #[error("Invalid Instruction")]
     InvalidInstruction,
+    #[error("Remaining Balance")]
     RemainingBalance,
+}
+
+impl From<ErrorCode> for ProgramError {
+    fn from(e: ErrorCode) -> Self {
+        ProgramError::Custom(e as u32)
+    }
+}
+
+impl<T> DecodeError<T> for ErrorCode {
+    fn type_of() -> &'static str {
+        "Metadata Error"
+    }
+}
+
+impl PrintProgramError for ErrorCode {
+    fn print<E>(&self)
+        where
+            E: 'static + std::error::Error + DecodeError<E> + PrintProgramError + FromPrimitiveTrait,
+    {
+        match self {
+            ErrorCode::InvalidInstruction => msg!("Invalid Instruction."),
+            ErrorCode::RemainingBalance => msg!("Account still has lamports."),
+        }
+    }
 }
