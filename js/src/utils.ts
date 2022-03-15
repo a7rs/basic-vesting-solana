@@ -10,10 +10,20 @@ import {
 	TransactionInstruction,
 	PublicKey,
 } from '@solana/web3.js';
-
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
 
 const U64SIZE: number = 8;
+const U32SIZE: number = 4;
+const DISCRIMINANT: number = 16;
+const SLICE: number = -2;
+const ENDPOINTS = {
+	mainnet: "https://api.mainnet-beta.solana.com",
+	devnet: "https://api.devnet.solana.com",
+	testnet: "https://api.testnet.solana.com",
+	localhost: "127.0.1.1",
+};
+
+const connection = new Connection(ENDPOINTS.mainnet);
 
 export class Numberu64 extends BN {
 	toBuffer(): Buffer {
@@ -22,7 +32,7 @@ export class Numberu64 extends BN {
 		if (b.length === U64SIZE) {
 			return b;
 		}
-		assert(b.length < U64SIZE, 'Numberu64 is limited to 8 bytes'); 
+		assert(b.length < U64SIZE, `Numberu64 is limited to ${U64SIZE} bytes`); 
 		const zeroPad = Buffer.alloc(U64SIZE);
 		b.copy(zeroPad);
 		return zeroPad;
@@ -33,9 +43,9 @@ export class Numberu64 extends BN {
 		return new BN(
 			[...buffer]
 				.reverse()
-				.map(i => `00${i.toString(16)}`.slice(-2))
+				.map(i => `00${i.toString(DISCRIMINANT)}`.slice(SLICE))
 				.join(''),
-			16s,
+			DISCRIMINANT,
 		);
 	}
 }
@@ -44,24 +54,24 @@ export class Numberu32 extends BN {
   toBuffer(): Buffer {
     const a = super.toArray().reverse();
     const b = Buffer.from(a);
-    if (b.length === 4) {
+    if (b.length === U32SIZE) {
       return b;
     }
-    assert(b.length < 4, 'Numberu32 too large');
+    assert(b.length < U32SIZE, `Numberu32 is limited to ${U32SIZE} bytes`);
 
-    const zeroPad = Buffer.alloc(4);
+    const zeroPad = Buffer.alloc(U32SIZE);
     b.copy(zeroPad);
     return zeroPad;
   }
 
   static fromBuffer(buffer: any): any {
-    assert(buffer.length === 4, `Invalid buffer length: ${buffer.length}`);
+    assert(buffer.length === U32SIZE, `Invalid buffer length: ${buffer.length}`);
     return new BN(
       [...buffer]
         .reverse()
-        .map(i => `00${i.toString(16)}`.slice(-2))
+        .map(i => `00${i.toString(DISCRIMINANT)}`.slice(SLICE))
         .join(''),
-      16,
+      DISCRIMINANT,
     );
   }
 }
@@ -270,7 +280,7 @@ export const setAuthority = async (
 	return new TransactionInstruction({
 		keys,
 		programId,
-		data: Buffer.from([]).
+		data: Buffer.from([]),
 	});
 };
 
