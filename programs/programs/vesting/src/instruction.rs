@@ -5,15 +5,27 @@ use solana_program::{
     pubkey::Pubkey,
 };
 
-use crate::error::ErrorCode::InvalidInstruction;
-use std::{convert::TryInto, mem::size_of};
+use crate::{error::ErrorCode::InvalidInstruction, state::PK_LEN};
+
+use std::convert::TryInto;
+use std::mem::size_of;
+
+const IX_INIT: u8 = 0;
+const IX_CREATE: u8 = 1;
+const IX_WITHDRAW: u8 = 2;
+const IX_SETBENEFICIARY: u8 = 3;
+
+const S_TS: usize = BENEFICIARY + PK_LEN;
+const E_TS: usize = S_TS + 8;
+const N: usize = E_TS + 8;
+const NONCE: usize = N + 8;
+const AMOUNT: usize = NONCE + 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum VestingInstruction {
-
     /// Convenience function for creating vesting account
     ///
-    /// Accounts expected: 
+    /// Accounts expected:
     /// `[s,w]` Authority
     /// `[w]` Vesting Account
     /// `[]` System Program
@@ -21,82 +33,39 @@ pub enum VestingInstruction {
 
     /// Accounts expected:
     ///
-    /// `[s,w]` Authority 
+    /// `[s,w]` Authority
+    /// `[w]` Token Account
     /// `[w]` Vesting Account
     /// `[w]` Vault
     /// `[]` Metadata Account
     /// `[]` Token Program
     CreateVesting {
+        beneficiary: Pubkey,
+        start_ts: u64,
+        end_ts: u64,
+        period_count: u64,
+        nonce: u8,
         amount: u64,
     },
 
     /// Accounts expected:
     ///
     /// `[s,w]` Authority
+    /// `[w]` Token Account
     /// `[w]` Vesting Account
     /// `[w]` Vault
     /// `[]` Metadata Account
     /// `[]` Token Program
-    Withdraw {
-        amount: u64,
-    }
+    Withdraw { amount: u64 },
 
     /// Accounts Expected:
     ///
     /// `[w,s]` Authority
-    ChangeBeneficiary {
-        new_beneficiary: Pubkey,
-    },
-
-    /// Accounts expected:
-    ///
-    /// `[s,w]` Authority
-    ChangeAuthority {
-        new_authority: Pubkey,
-    },
-}
-
-impl LockupInstruction {
-    pub fn pack(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(size_of::<Self>());
-        match self {
-            Self::New => {
-                buf.push(0);
-            },
-            Self::WhitelistAdd => {
-                buf.push(1);
-                buf.extend_from_slice(entry::Pubkey);
-            },
-            Self::WhitelistDelete => {
-                buf.push(2);
-                buf.extend_from_slice(entry::Pubkey);
-            },
-            Self::WhitelistAuthority => {
-                buf.push(3);
-                buf.extend_from_slice(entry::Pubkey);
-            },
-        }
-        buf
-    }
-     
-    /// Convenience function for unpacking entries
-    fn unpack_entry(data: &[u8]) -> Result<Pubkey, ProgramError> {
-        Ok(data.get(..32)
-            .and_then(|slice| slice.try_into().ok())
-            .map(Pubkey::from_bytes)
-            .ok_or(InvalidInstruction)?)
-    }
-
-    pub fn unpack(data: &[u8]) -> Result<Self, ProgramError> {
-        let (tag, rest) = data.split_first().ok_or(InvalidInstruction)?;
-        Ok(match tag {
-            0 => Self::New;
-            1 => Self::WhitelistAdd { unpack_entry(rest)? }
-            2 => Self::WhitelistDelete { unpack_entry(rest)? }
-            3 => Self::WhitelistAuthority { unpack_entry(rest)? }
-            _ => return Err(ProgramError::InvalidArgument)
-        })
-    }
+    /// `[w]` New Beneficiary Authority
+    /// `[w]` New Beneficiary Vesting Account
+    /// `[w]` New Beneficiary Token Account
+    /// `[]` Token Program
+    SetBeneficiary { new_beneficiary: Pubkey },
 }
 
 impl VestingInstruction {
@@ -104,371 +73,223 @@ impl VestingInstruction {
         let mut buf = Vec::with_capacity(size_of::<Self>());
 
         match self {
+            Self::Init => buf.push(IX_INIT),
             Self::CreateVesting {
                 beneficiary,
-                deposit_amount,
-                nonce,
                 start_ts,
                 end_ts,
                 period_count,
-                //realizor<Realizor>,
+                nonce,
+                amount,
             } => {
-                buf.push(0);
-                buf.extend_from_slice(beneficiary.to_bytes());
-                buf.extend_from_slice(deposit_amount.to_le_bytes());
-                buf.extend_from_slice(nonce.to_le_bytes());
-                buf.extend_from_slice(period_count.to_le_bytes());
-                //buf.extend_from_slice(realizor.____());
-            Self::Withdraw { amount } => {
-                buf.push(1);
-                buf.extend_from_slice(amount.to_le_bytes());
-            },
-            Self::WhitelistWithdraw { amount } => {
-                buf.push(2);
-                buf.extend_from_slice(amount.to_le_bytes());
-            },
-            Self::WhitelistDeposit { amount } => {
-                buf.push(3);
-                buf.extend_from_slice(amount.to_le_bytes());
+                buf.push(IX_CREATE);
+                buf.extend_from_slice(beneficiary.as_ref());
+                buf.extend_from_slice(&start_ts.to_le_bytes());
+                buf.extend_from_slice(&end_ts.to_le_bytes());
+                buf.extend_from_slice(&period_count.to_le_bytes());
+                buf.extend_from_slice(&nonce.to_le_bytes());
+                buf.extend_from_slice(&amount.to_le_bytes());
             }
-            Self::AvailableForWithdrawal => buf.push(4);
+            Self::Withdraw { amount } => {
+                buf.push(IX_WITHDRAW);
+                buf.extend_from_slice(&amount.to_le_bytes());
+            }
+            Self::SetBeneficiary {
+                new_beneficiary: Pubkey,
+            } => {
+                buf.push(IX_SETBENEFICIARY);
+                buf.extend_from_slice(new_beneficiary.as_ref());
             }
         }
         buf
     }
 
-    /// Convenience function for unpacking u64 amount at the start of a buffer
-    fn unpack_amount(data: &[u8]) -> Result<u64, ProgramError> {
-        Ok(data.get(..8)
-            .and_then(|slice| slice.try_into().ok())
-            .map(u64::from_le_bytes)
-            .ok_or(InvalidInstruction)?)
-    }
-        
-    pub fn unpack(data: &[u8]) -> Result<Self, ProgramError> {
+    fn unpack(data: &[u8]) -> Result<Self, ProgramError> {
         let (tag, rest) = data.split_first().ok_or(InvalidInstruction)?;
         Ok(match tag {
-            0 => {
-                let beneficiary = rest.get(..32)
-                    .and_then(|slice| slice.try_into().ok())
-                    .map(Pubkey::from_bytes)
+            IX_INIT => Self::Init,
+            IX_CREATE => {
+                let beneficiary = rest
+                    .get(..S_TS)
+                    .and_then(|s| s.try_into().ok())
+                    .map(Pubkey::new_from_array)
                     .ok_or(InvalidInstruction)?;
-                let deposit_amount = rest.get(32..40)
-                    .and_then(|slice| slice.try_into().ok())
+                let start_ts = rest
+                    .get(S_TS..E_TS)
+                    .and_then(|s| s.try_into().ok())
                     .map(u64::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
-                let nonce = rest.get(41)
-                    .and_then(|slice| slice.try_into().ok())
+                let end_ts = rest
+                    .get(E_TS..N)
+                    .and_then(|s| s.try_into().ok())
+                    .map(u64::from_le_bytes)
+                    .ok_or(InvalidInstruction)?;
+                let period_count = rest
+                    .get(N..NONCE)
+                    .and_then(|s| s.try_into().ok())
+                    .map(u64::from_le_bytes)
+                    .ok_or(InvalidInstruction)?;
+                let nonce = rest
+                    .get(NONCE..AMOUNT)
+                    .and_then(|s| s.try_into().ok())
                     .map(u8::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
-                let start_ts = rest.get(41..49)
-                    .and_then(|slice| slice.try_into().ok())
+                let amount = rest
+                    .get(AMOUNT..)
+                    .and_then(|s| s.try_into().ok())
                     .map(u64::from_le_bytes)
                     .ok_or(InvalidInstruction)?;
-                let end_ts = rest.get(49..57)
-                    .and_then(|slice| slice.try_into().ok())
-                    .map(u64::from_le_bytes)
-                    .ok_or(InvalidInstruction)?;
-                let period_count = rest.get(57..65)
-                    .and_then(|slice| slice.try_into().ok())
-                    .map(u64::from_le_bytes)
-                    .ok_or(InvalidInstruction)?;
-                // let realizor =
                 Self::CreateVesting {
                     beneficiary,
-                    deposit_amount,
-                    nonce,
                     start_ts,
                     end_ts,
                     period_count,
-                    //realizor
+                    nonce,
+                    amount,
                 }
-            },
-            1 => Self::Withdraw { amount: unpack_amount(rest)? },
-            2 => Self::WhitelistWithdraw { amount: unpack_amount(rest)? },
-            3 => Self::WhitelistDeposit { amount: unpack_amount(rest)? },
-            4 => Self::AvailableForWithdrawal,
+            }
+            IX_WITHDRAW => {
+                let amount = rest
+                    .get(..)
+                    .and_then(|s| s.try_into().ok())
+                    .map(u64::from_le_bytes)
+                    .ok_or(InvalidInstruction)?;
+                Self::Withdraw { amount }
+            }
+            IX_SETBENEFICIARY => {
+                let new_beneficiary = rest
+                    .get(..)
+                    .and_then(|s| s.try_into().ok())
+                    .map(Pubkey::new_from_array)
+                    .ok_or(InvalidInstruction)?;
+                Self::SetBeneficiary { new_beneficiary }
+            }
             _ => return Err(ProgramError::InvalidArgument),
         })
     }
 }
 
-/// RPC APIs
+pub fn init(
+    program_id: &Pubkey,
+    payer: &Pubkey,
+    vesting: &Pubkey,
+    system_program: &Pubkey,
+) -> Result<Instruction, ProgramError> {
+    msg!("Vesting: Init");
+
+    let accounts = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(*vesting, false),
+        AccountMeta::new_readonly(*system_program, false),
+    ];
+
+    let data = VestingIntruction::Init.pack();
+
+    Ok(Instruction {
+        program_id: *program_id,
+        accounts,
+        data,
+    })
+}
+
 pub fn create_vesting(
-    program_id: Pubkey,
-    vesting: Pubkey,
-    vault: Pubkey,
-    depositor: Pubkey,
-    depositor_authority: Pubkey,
-    token_program: Pubkey,
-    rent: Pubkey,
-    clock: Pubkey,
-    beneficiary: Pubkey, //do not pass as account
-    deposit_amount: u64,
-    nonce: u8,
+    program_id: &Pubkey,
+    vesting: &Pubkey,
+    vault: &Pubkey,
+    authority: &Pubkey,
+    token_account: &Pubkey,
+    metadata: &Pubkey,
+    token_program: &Pubkey,
     start_ts: u64,
     end_ts: u64,
     period_count: u64,
-) -> Result<Instruction, ProgramError> {
-    msg!("SCY Lockup Call: CreateVesting");
+    nonce: u8,
+    amount: u64,
+) -> Result<Instruction, ProgramErro> {
+    msg!("Vesting: Create");
+
     let accounts = vec![
-        AccountMeta::new(vesting, false),
-        AccountMeta::new(vault, false),
-        AccountMeta::new(depositor, false),
-        AccountMeta::new(depositor_authority, true),
-        AccountMeta::new_readonly(token_program, false),
-        AccountMeta::new_readonly(rent, false),
-        AccountMeta::new_readonly(clock, false),
+        AccountMeta::new(*vesting, false),
+        AccountMeta::new(*vault, false),
+        AccountMeta::new(*authority, true),
+        AccountMeta::new(*token_account, false),
+        AccountMeta::new_readonly(*metadata, false),
+        AccountMeta::new_readonly(*token_program, false),
     ];
 
     let data = VestingInstruction::CreateVesting {
         beneficiary,
-        deposit_amount,
-        nonce,
         start_ts,
-        end_ts,
-        period_count,
-    }.pack();
+        end_ts,       // should be calculated utlizing metadata
+        period_count, // should pull from metadata
+        nonce,
+        amount,
+    }
+    .pack();
 
     Ok(Instruction {
-        program_id,
+        program_id: *program_id,
         accounts,
         data,
     })
 }
 
 pub fn withdraw(
-    program_id: Pubkey,
-    vesting: Pubkey,
-    beneficiary: Pubkey,
-    vault: Pubkey,
-    vesting_signer: Pubkey,
-    receiving_token_account: Pubkey,
-    token_program: Pubkey,
-    clock: Pubkey,
+    program_id: &Pubkey,
+    vesting: &Pubkey,
+    vault: &Pubkey,
+    authority: &Pubkey,
+    token_account: &Pubkey,
+    metadata: &Pubkey,
+    token_program: &Pubkey,
     amount: u64,
 ) -> Result<Instruction, ProgramError> {
-    msg!("SCY Lockup Call: Withdraw");
+    msg!("Vesting: Withdraw");
+
     let accounts = vec![
-        AccountMeta::new(vesting, false),
-        AccountMeta::new(beneficiary, false),
-        AccountMeta::new(vault, false),
-        AccountMeta::new(vesting_signer, true),
-        AccountMeta::new(receiving_token_account, false),
-        AccountMeta::new_readonly(token_program, false),
-        AccountMeta::new_readonly(clock, false),
+        AccountMeta::new(*vesting, false),
+        AccountMeta::new(*vault, false),
+        AccountMeta::new(*authority, true),
+        AccountMeta::new(*token_account, false),
+        AccountMeta::new_readonly(*metadata, false),
+        AccountMeta::new_readonly(*token_program, false),
     ];
 
-    let data = VestingInstruction::Withdraw { amount }.pack();
+    let data = VestingInstruction::Withdraw { amount: u64 }.pack();
+
     Ok(Instruction {
-        program_id,
+        program_id: *program_id,
         accounts,
         data,
     })
 }
-   
 
-pub fn available_for_withdrawal(
-    program_id: Pubkey,
-    vesting: Pubkey,
-    clock: Pubkey,
+pub fn set_beneficiary(
+    program_id: &Pubkey,
+    authority: &Pubkey,
+    new_beneficiary: &Pubkey,
+    new_beneficiary_vesting_address: &Pubkey,
+    new_beneficiary_token_address: &Pubkey,
+    token_program: &Pubkey,
 ) -> Result<Instruction, ProgramError> {
-    msg!("SCY Lockup Call: AvailableForWithdrawal");
+    msg!("Vesting: Set Beneficiary");
+
     let accounts = vec![
-        AccountMeta::new_readonly(vesting, false),
-        AccountMeta::new_readonly(clock, false),
+        AccountMeta::new(*authority, true),
+        AccountMeta::new(*new_beneficiary, false),
+        AccountMeta::new(*new_beneficiary_vesting_address, false),
+        AccountMeta::new(*new_beneficiary_token_address, false),
+        AccountMeta::new_readonly(*token_program, false),
     ];
-    let data = VestingInstruction::AvailableForWithdrawal.pack();
+
+    let data = VestingInstruction::SetBeneficiary {
+        new_beneficiary: *new_beneficiary,
+    }
+    .pack();
 
     Ok(Instruction {
-        program_id,
+        program_id: *program_id,
         accounts,
         data,
     })
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use solana_program::{instruction::AccountMeta, pubkey::Pubkey};
-
-    #[test]
-    fn test_pack_unpack_vesting_instructions() {
-        let create = VestingInstruction::CreateVesting {
-            beneficiary: Pubkey::new_unique(),
-            deposit_amount: 69_420_000,
-            nonce: 69,
-            start_ts: 69_696_696,
-            end_ts: 420_420_420,
-            period_count: 420,
-        };
-        let withdraw = VestingInstruction::Withdraw { amount: 420 };
-        let whitelist_withdraw = VestingInstruction::WhitelistWithdraw { amount };
-        let whitelist_deposit = VestingInstruction::WhitelistDeposit { amount };
-        let available = VestingInstruction::Available;
-        
-        let packed_create = create.pack();
-        let packed_withdraw = withdraw.pack();
-        let packed_whitelist_withdraw = whitelist_withdraw.pack();
-        let packed_whitelist_deposit = whitelist_deposit.pack();
-        let packed_available = available.pack();
-
-        let unpacked_create = VestingInstruction::unpack(&packed_create).unwrap();
-        let unpacked_withdraw = VestingInstruction::unpack(&packed_withdraw).unwrap();
-        let unpacked_whitelist_withdraw = VestingInstruction::unpack(&packed_whitelist_withdraw).unwrap();
-        let unpacked_whitelist_deposit = VestingInstruction::unpack(&packed_whitelist_deposit).unwrap();
-        let unpacked_available = VestingInstruction::unpack(&packed_available).unwrap();
-
-        assert_eq!(create, unpacked_create);
-        assert_eq!(withdraw, unpacked_withdraw);
-        assert_eq!(whitelist_withdraw, unpacked_whitelist_withdraw);
-        assert_eq!(whitelist_deposit, unpacked_whitelist_deposit);
-        assert_eq!(available, unpacked_available);
-    }
-
-    #[test]
-    fn test_create_api() {
-        let program_id = crate::entrypoint::id();
-        let vesting = Pubkey::new_unique();
-        let vault = Pubkey::new_unique();
-        let depositor = Pubkey::new_unique();
-        let depositor_authority = Pubkey::new_unique();
-        let token_program = Pubkey::new_unique();
-        let rent = Pubkey::new_unique();
-        let clock = Pubkey::new_unique();
-        let beneficiary = Pubkey::new_unique();
-        let deposit_amount = 69_420_000;
-        let nonce = 42;
-        let start_ts = 69_000_000;
-        let end_ts = 420_000_000;
-        let period_count = 690;
-
-        let create = crate::instruction::create_vesting(
-            program_id,
-            vesting,
-            vault,
-            depositor,
-            depositor_authority,
-            token_program,
-            rent,
-            clock,
-            beneficiary,
-            deposit_amount,
-            nonce,
-            start_ts,
-            end_ts,
-            period_count,
-        ).unwrap();
-
-        let accounts = vec![
-            AccountMeta::new(vesting, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new(depositor, false),
-            AccountMeta::new(depositor_authority, true),
-            AccountMeta::new_readonly(token_program, false),
-            AccountMeta::new_readonly(rent, false),
-            AccountMeta::new_readonly(clock, false),
-        ];
-
-        let data = VestingInstruction::CreateVesting {
-            beneficiary,
-            deposit_amount,
-            nonce,
-            start_ts,
-            end_ts,
-            period_count,
-        }.pack();
-
-        assert_eq!(create.accounts, accounts);
-        assert_eq!(create.data, data);
-    }
-
-    #[test]
-    fn test_withdraw_api() {
-        let program_id = crate::entrypoint::id();
-        let vesting = Pubkey::new_unique();
-        let beneficiary = Pubkey::new_unique();
-        let vault = Pubkey::new_unique();
-        let vesting_signer = Pubkey::new_unique();
-        let receiving_token_account = Pubkey::new_unique();
-        let token_program = Pubkey::new_unique();
-        let clock = Pubkey::new_unique();
-        let amount = u64;
-        
-        let withdraw = crate::instruction::withdraw(
-            program_id,
-            vesting,
-            beneficiary,
-            vault,
-            vesting_signer,
-            receiving_token_account,
-            token_program,
-            clock,
-            amount,
-        ).unwrap();
-
-        let data = VestingInstruction::Withdraw { amount }.pack();
-
-        assert_eq!(withdraw.accounts, accounts);
-        assert_eq!(withdraw.data, data);
-    }
-
-    #[test]
-    fn test_whitelist_withdraw_api() {
-        let program_id = crate::entrypoint::id();
-        let vesting = Pubkey::new_unique();
-        let vault = Pubkey::new_unique();
-        let vesting_signer = Pubkey::new_unique();
-        let token_program = Pubkey::new_unique();
-        let whitelisted_program_vault = Pubkey::new_unique();
-        let whitelisted_program_vault_authority = Pubkey::new_unique();
-        let amount = 420;
-
-        let ww = crate::instruction::whitelist_withdraw(
-            program_id,
-            vesting,
-            vault,
-            vesting_signer,
-            token_program,
-            whitelisted_program_vault,
-            whitelisted_program_vault_authority,
-        ).unwrap();
-        
-        let accounts = vec![
-            AccountMeta::new(vesting, false),
-            AccountMeta::new(vault, false),
-            AccountMeta::new(vesting_signer, true),
-            AccountMeta::new_readonly(token_program, false),
-            AccountMeta::new(whitelisted_program_vault, false),
-            AccountMeta::new(whitelisted_program_vault_authority, true),
-        ];
-
-        let data = VestingInstruction::WhitelistWithdraw { amount }.pack();
-
-        assert_eq!(ww.accounts, accounts);
-        assert_eq!(ww.data, data);
-    }
-
-    #[test]
-    fn available_for_withdrawal() {
-        let program_id = crate::entrypoint::id();
-        let vesting = Pubkey::new_unique();
-        let clock = Pubkey::new_unique();
-
-        let available = crate::instruction::available_for_withdrawal(
-            program_id,
-            vesting,
-            clock,
-        ).unwrap();
-
-        let accounts = vec![
-            AccountMeta::new_readonly(vesting, false),
-            AccountMeta::new_readonly(clock, false),
-        ];
-
-        let data = VestingInstruction::AvailableForWithdrawal.pack();
-
-        assert_eq!(available.accounts, accounts);
-        assert_eq!(available.data, data);
-    }
 }
