@@ -1,6 +1,7 @@
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
+    msg,
     program_error::ProgramError,
     program_pack::Pack,
     pubkey::Pubkey,
@@ -9,47 +10,33 @@ use solana_program::{
 
 use crate::{
     error::ErrorCode,
+    instruction::{IxCtx, MetadataInstruction},
     state::MetadataState,
-    instruction::{
-        MetadataInstruction,
-        IxCtx,
-    },
 };
 
 pub struct Processor;
 
 impl Processor {
-    pub fn process(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        data: &[u8],
-    ) -> ProgramResult {
+    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
         let instruction = MetadataInstruction::unpack(data)?;
 
         match instruction {
-            MetadataInstruction::Create(IxCtx) => Self::process_create(
-                program_id,
-                accounts,
-                ix_ctx,
-            ),
-            MetadataInstruction::Update(IxCtx) => Self::process_update(
-                program_id,
-                accounts,
-                ix_ctx,
-            ),
-            MetadataInstruction::Delete(IxCtx) => Self::process_delete(
-                program_id,
-                accounts,
-                ix_ctx,
-            ),
-            _ => unreachable!(),
+            MetadataInstruction::Create(ix_ctx) => {
+                Self::process_create(program_id, accounts, ix_ctx)?
+            }
+            MetadataInstruction::Update(ix_ctx) => {
+                Self::process_update(program_id, accounts, ix_ctx)?
+            }
+            MetadataInstruction::Delete(ix_ctx) => {
+                Self::process_delete(program_id, accounts, ix_ctx)?
+            }
         }
 
         Ok(())
     }
 
     fn process_create(
-        program_id: &Pubkey,
+        _program_id: &Pubkey,
         accounts: &[AccountInfo],
         ix_ctx: IxCtx,
     ) -> Result<(), ProgramError> {
@@ -58,11 +45,11 @@ impl Processor {
         let authority = next_account_info(accounts_iter)?;
         let metadata_account = next_account_info(accounts_iter)?;
 
-        let metadata_data = metadata_account.data.borrow_mut();
+        let mut metadata_data = metadata_account.data.borrow_mut();
 
         let metadata = MetadataState {
             is_initialized: true,
-            authority: ix_ctx.authority,
+            authority: *authority.key,
             vault: ix_ctx.vault,
             duration: ix_ctx.duration,
             apr: ix_ctx.apr,
@@ -76,7 +63,7 @@ impl Processor {
     }
 
     fn process_update(
-        program_id: &Pubkey,
+        _program_id: &Pubkey,
         accounts: &[AccountInfo],
         ix_ctx: IxCtx,
     ) -> Result<(), ProgramError> {
@@ -85,11 +72,11 @@ impl Processor {
         let authority = next_account_info(accounts_iter)?;
         let metadata_account = next_account_info(accounts_iter)?;
 
-        let metadata_data = metadata_account.data.borrow_mut();
+        let mut metadata_data = metadata_account.data.borrow_mut();
 
         let metadata = MetadataState {
             is_initialized: true,
-            authority: ix_ctx.authority,
+            authority: *authority.key,
             vault: ix_ctx.vault,
             duration: ix_ctx.duration,
             apr: ix_ctx.apr,
@@ -103,16 +90,19 @@ impl Processor {
     }
 
     fn process_delete(
-        program_id:&Pubkey,
-        accounts: &[AccountInfo],
-        ix_ctx: IxCtx,
+        _program_id: &Pubkey,
+        _accounts: &[AccountInfo],
+        _ix_ctx: IxCtx,
     ) -> Result<(), ProgramError> {
+        msg!("Ok");
+        /*
         let accounts_iter = &mut accounts.iter();
 
         let authority = next_account_info(accounts_iter)?;
         let metadata_account = next_account_info(accounts_iter)?;
 
-        metadata_account.data.borrow_mut() = &[0u8; MetadataState::LEN];
+        let metadata = metadata_account.data.borrow_mut();
+            &[0u8; MetadataState::LEN];
 
         system_instruction::transfer(
             from_pubkey: metadata_account,
@@ -121,9 +111,11 @@ impl Processor {
         );
 
         if metadata_account.lamports != 0 {
-            return Err(ErrorCode::RemainingBalance);
+            return Err();
         } else {
             Ok(())
         }
+        */
+        Ok(())
     }
 }
