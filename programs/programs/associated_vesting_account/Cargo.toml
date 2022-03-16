@@ -10,3 +10,5 @@ no-entrypoint = []
 [dependencies]
 solana-program = "1.10.2"
 thiserror = "1.0.30"
+
+vesting = { version = "0.1.0", path = "../vesting", features = ["no-entrypoint"] }

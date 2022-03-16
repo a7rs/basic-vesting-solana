@@ -5,40 +5,47 @@ use solana_program::{
     program_error::ProgramError,
     pubkey::Pubkey,
 };
+
+use crate::{error::ErrorCode, instruction::VestingInstruction, state::VestingState};
+
 pub struct Processor;
 
 impl Processor {
-    pub fn process_instruction(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        data: &[u8],
-    ) -> ProgramResult {
+    pub fn process(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
         let instruction = VestingInstruction::unpack(data)?;
 
         match instruction {
-            VestingInstruction::Init {
-                seed,
-                release_count,
-            } => {
-                Self::process_init(program_id, accounts, seed, release_count)?;
+            VestingInstruction::Init => Self::process_init(program_id, accounts)?,
+            VestingInstruction::CreateVesting {
+                program_id,
+                accounts,
+                beneficiary,
+                start_ts,
+                end_ts,
+                period_count,
+                nonce,
+                amount,
+            } => Self::process_create_vesting(
+                program_id,
+                accounts,
+                &beneficiary,
+                start_ts,
+                end_ts,
+                period_count,
+                nonce,
+                amount,
+            )?,
+            VestingInstruction::Withdraw { amount } => {
+                Self::process_withdraw(program_id, accounts, amount)?;
             }
-            VestingInstruction::Create {
-                seed,
-                mint,
-                recipient,
-                releases,
-            } => {
-                Self::process_create_vc(program_id, accounts, seed, mint, recipient, releases)?;
-            }
-            VestingInstruction::Unlock { seed } => {
-                Self::process_unlock_tokens(program_id, accounts, seed)?;
+            VestingInstruction::SetBeneficiary { new_beneficiary } => {
+                Self::process_set_beneficiary(program_id, accounts, new_beneficiary)?;
             }
         }
         Ok(())
     }
 
     fn process_init(program_id: &Pubkey, accounts: &[AccountInfo]) -> Result<(), ProgramError> {
-        msg!("Instruction: Initialize Accounts");
         let accounts_iter = &mut accounts.iter();
 
         let authority = next_account_info(accounts_iter)?;
@@ -52,13 +59,11 @@ impl Processor {
             return Err(ProgramError::InvalidArgument);
         }
 
-        let state_size = (release_count as usize) * VestingInfo::LEN + VestingHeader::LEN;
-
         let initialize_vesting_account_ix = create_account(
-            &token_authority.key,
+            &authority.key,
             &vesting_account_pda,
-            rent.minimum_balance(state_size),
-            state_size as u64,
+            rent.minimum_balance(VestingState::LEN),
+            VestingState::LEN as u64,
             &program_id,
         );
 
@@ -78,18 +83,20 @@ impl Processor {
     fn process_create_vesting(
         program_id: &Pubkey,
         accounts: &[AccountInfo],
-        seed: [u8; 32],
-        mint: Pubkey,
-        recipient: Pubkey,
-        releases: Vec<VestingInfo>,
+        beneficiary: &Pubkey,
+        start_ts: u64,
+        end_ts: u64,
+        period_count: u64,
+        nonce: u8,
+        amount: u64,
     ) -> Result<(), ProgramError> {
-        msg!("Instruction: Create Vesting Contract");
         let accounts_iter = &mut accounts.iter();
 
         let authority = next_account_info(accounts_iter)?;
         let token_account = next_account_info(accounts_iter)?;
         let vesting_account = next_account_info(accounts_iter)?;
-        let vesting_vault = next_account_info(accounts_iter)?;
+        let vault = next_account_info(accounts_iter)?;
+        let metadata = next_account_info(accounts_iter)?;
         let token_program = next_account_info(accounts_iter)?;
 
         if !authority.is_signer {
@@ -97,7 +104,7 @@ impl Processor {
             return Err(ProgramError::InvalidArgument);
         }
 
-        let vesting_account_pda = Pubkey::create_program_address(&[&seed], &program_id)?;
+        let vesting_account_pda = Pubkey::create_program_address(&[&], &program_id)?;
         if vesting_account_pda != *vesting_account.key {
             msg!("Incorrect vesting account address");
             return Err(ProgramError::InvalidArgument);
