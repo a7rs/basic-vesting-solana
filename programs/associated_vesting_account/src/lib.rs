@@ -91,4 +91,54 @@ impl Processor {
 
         Ok(())
     }
+
+    fn process_create_associated_vesting_account(
+        program_id: &Pubkey,
+        accounts: &[AccountInfo],
+    ) -> Result<(), ProgramError> {
+        let accounts_iter = &mut accounts.iter();
+
+        let payer = next_account_info(accounts_iter)?;
+        let wallet = next_account_info(accounts_iter)?;
+        let mint = next_account_info(accounts_iter)?;
+        let vesting_account = next_account_info(accounts_iter)?;
+        let vesting_program = next_account_info(accounts_iter)?;
+        let system_program = next_account_info(accounts_iter)?;
+
+        let rent = Rent::get()?;
+        
+        let (associated_vesting_address, bump_seed) = get_associated_vest_and_bump_seed_internal(
+            wallet.key,
+            mint.key,
+            program_id,
+            vesting_program,
+        );
+
+        if associated_vesting_address != *associated_vesting_address.key {
+            return Err(InvalidSeeds)
+        }
+
+        if *associated_vesting_account.owner != system_program::id() {
+            return Err(IllegalOwner)
+        }
+
+        let associated_vesting_account_signer_seeds: &[&[_]] = &[
+            wallet.as_ref(),
+            vesting_program.as_ref(),
+            mint.as_ref(),
+            &[bump_seed],
+        ];
+
+        create_pda_account(
+            payer,
+            &rent,
+            vesting::state::VestingState::LEN,
+            vesting_program.key,
+            system_program,
+            associated_vesting_account,
+            associated_vesting_account_signer_seeds,
+        )?;
+
+
+    }
 }
