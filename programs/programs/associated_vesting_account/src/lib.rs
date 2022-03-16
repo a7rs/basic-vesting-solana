@@ -11,6 +11,8 @@ use solana_program::{
     system_instruction,
 };
 
+use vesting::*;
+
 use thiserror::Error;
 
 declare_id!("");
@@ -31,14 +33,14 @@ pub(crate) fn get_associated_vesting_address_and_bump_seed(
 }
 
 pub fn get_associated_vesting_address(wallet_address: &Pubkey, mint: &Pubkey) -> Pubkey {
-    get_associated_vesting_address_with_program_id(wallet_address, mint, vesting_program)
+    get_associated_vesting_address_with_program_id(wallet_address, mint)
 }
 
 pub fn get_associated_vesting_address_with_program_id(
     wallet_address: &Pubkey,
     mint: &Pubkey,
-    vesting_program: &Pubkey,
 ) -> Pubkey {
+    get_associated_vesting_address_and_bump_seed(wallet_address, mint, vesting::id(), id()).0
 }
 
 pub fn get_associated_vesting_address_and_bump_seed_internal(
