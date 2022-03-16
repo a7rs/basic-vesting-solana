@@ -1,0 +1,17 @@
+[package]
+name = "vesting-metadata"
+description = "Create metadata objects for lockups on Solana"
+authors = ["Andrew Fraser<a@serfrae.com>"]
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+solana-program = "1.10.0"
+arrayref = "0.3.6"
+num-traits = "0.2.14"
+num-derive = "0.3.3"
+thiserror = "1.0.30"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+crate = "vm"
