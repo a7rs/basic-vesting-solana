@@ -13,9 +13,8 @@ entrypoint!(entrypoint);
 const PK_LEN: usize = 32;
 
 const CREATE: u8 = 0;
-const READ: u8 = 1;
-const UPDATE: u8 = 2;
-const DELETE: u8 = 3;
+const UPDATE: u8 = 1;
+const DELETE: u8 = 2;
 
 const IX_AUTH: usize = 0;
 const IX_VAULT: usize = PK_LEN;
@@ -32,6 +31,7 @@ const DURA: usize = VAULT + PK_LEN;
 const APR: usize = DURA + 8;
 const WTL: usize = APR + 8;
 const FEE: usize = WTL + 8;
+const LT: usize = FEE + 8;
 
 pub fn entrypoint(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> ProgramResult {
     msg!("Entrypoint: Vesting Metadata");
@@ -56,6 +56,8 @@ pub struct IxCtx {
     withdrawal_timelock: u64,
     ///
     early_withdrawal_fee: u64,
+    ///
+    lifetime: u64,
 }
 
 impl IxCtx {
@@ -67,6 +69,7 @@ impl IxCtx {
         buf.extend_from_slice(self.apr.to_le_bytes());
         buf.extend_from_slice(self.withdrawal_timelock.to_le_bytes());
         buf.extend_from_slice(self.early_withdrawal_fee.to_le_bytes());
+        buf.extend_from_slice(self.lifetime.to_le_bytes());
         buf
     }
 
@@ -102,7 +105,13 @@ impl IxCtx {
             .ok_or(InvalidInstruction)?;
 
         let early_withdrawal_fee = data
-            .get(IX_FEE..)
+            .get(IX_FEE..IX_LIFE)
+            .and_then(|s| s.try_into().ok())
+            .map(u64::from_le_bytes)
+            .ok_or(InvalidInstruction)?;
+
+        let lifetime = data
+            .get(IX_LIFE..)
             .and_then(|s| s.try_into().ok())
             .map(u64::from_le_bytes)
             .ok_or(InvalidInstruction)?;
@@ -114,6 +123,7 @@ impl IxCtx {
             apr,
             withdrawal_timelock,
             early_withdrawal_fee,
+            lifetime,
         })
     }
 }
@@ -137,10 +147,6 @@ impl MetadataInstruction {
                 buf.push(CREATE);
                 buf.extend_from_slice(ixctx.pack());
             }
-            Read(ixctx) => {
-                buf.push(READ);
-                buf.extend_from_slice(ixctx.pack());
-            }
             Update(ixctx) => {
                 buf.push(UPDATE);
                 buf.extend_from_slice(ixctx.pack());
@@ -160,7 +166,6 @@ impl MetadataInstruction {
 
         match tag {
             CREATE => Self::Create(IxCtx::unpack(&rest)?),
-            READ => Self::Read(IxCtx::unpack(&rest)?),
             UPDATE => Self::Update(IxCtx::unpack(&rest)?),
             DELETE => Self::Delete(IxCtx::unpack(&rest)?),
             _ => unreachable!(),
@@ -178,6 +183,7 @@ pub struct EndpointCtx {
     apr: u64,
     withdrawal_timelock: u64,
     early_withdrawal_fee: u64,
+    lifetime: u64,
 }
 
 /// Endpoints
@@ -196,6 +202,7 @@ pub fn create(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
         early_withdrawal_fee: ctx.early_withdrawal_fee,
+        lifetime: ctx.lifetime,
     }
     .pack();
 
@@ -220,6 +227,7 @@ pub fn read(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
         early_withdrawal_fee: ctx.early_withdrawal_fee,
+        lifetime: ctx.lifetime,
     }
     .pack();
 
@@ -245,6 +253,7 @@ pub fn update(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
         early_withdrawal_fee: ctx.early_withdrawal_fee,
+        lifetime: ctx.lifetime,
     }
     .pack();
 
@@ -270,6 +279,7 @@ pub fn delete(ctx: EndpointCtx) -> Result<Instruction, ProgramError> {
         apr: ctx.apr,
         withdrawal_timelock: ctx.withdrawal_timelock,
         early_withdrawal_fee: ctx.early_withdrawal_fee,
+        lifetime: ctx.lifetime,
     }
     .pack();
 
@@ -288,6 +298,7 @@ pub struct MetadataState {
     pub apr: u64,
     pub withdrawal_timelock: u64,
     pub early_withdrawal_fee: u64,
+    pub lifetime: u64,
 }
 
 impl IsInitialized for MetadataState {
@@ -308,7 +319,8 @@ impl Pack for MetadataState {
         dst[DURA..APR].copy_from_slice(self.duration.to_le_bytes());
         dst[APR..WTL].copy_from_slice(self.apr.to_le_bytes());
         dst[WTL..FEE].copy_from_slice(self.withdrawal_timelock.to_le_bytes());
-        dst[FEE..].copy_from_slice(self.early_withdrawal_fee.to_le_bytes());
+        dst[FEE..LT].copy_from_slice(self.early_withdrawal_fee.to_le_bytes());
+        dst[LT..].copy_from_slice(self.liftime.to_le_bytes());
     }
 
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
@@ -323,7 +335,8 @@ impl Pack for MetadataState {
         let duration = u64::from_le_bytes(src[DURA..APR].try_into().unwrap());
         let apr = u64::from_le_bytes(src[APR..WTL]).try_into().unwrap());
         let withdrawal_timelock = u64::from_le_bytes(src[WTL..FEE].try_into().unwrap());
-        let early_withdrawal_fee = u64::from_le_bytes(src[FEE..].try_into().unwrap());
+        let early_withdrawal_fee = u64::from_le_bytes(src[FEE..LT].try_into().unwrap());
+        let lifetime = u64::from_le_bytes(src[LT..].try_into().unwrap());
 
         Ok(Self {
             is_initialized,
@@ -333,6 +346,7 @@ impl Pack for MetadataState {
             apr,
             withdrawal_timelock,
             early_withdrawal_fee,
+            lifetime,
         })
     }
 }
@@ -349,11 +363,6 @@ impl Processor {
 
         match instruction {
             MetadataInstruction::Create(IxCtx) => Self::process_create(
-                program_id,
-                accounts,
-                ix_ctx,
-            ),
-            MetadataInstruction::Read(IxCtx) => Self::process_read(
                 program_id,
                 accounts,
                 ix_ctx,
@@ -394,18 +403,12 @@ impl Processor {
             duration: ix_ctx.duration,
             apr: ix_ctx.apr,
             withdrawal_timelock: ix_ctx.withdrawal_timelock,
-            early_withdrawal_feel: ix_ctx.early_withdrawal_fee,
+            early_withdrawal_fee: ix_ctx.early_withdrawal_fee,
+            lifetime: ix_ctx.lifetime,
         }
 
         metadata.pack_into_slice(metadata_data);
         Ok(())
-    }
-
-    fn process_read(
-        program_id: &Pubkey,
-        accounts: &[AccountInfo],
-        ix_ctx: IxCtx,
-    ) -> Result<(), ProgramError> {
     }
 
     fn process_update(
@@ -428,6 +431,7 @@ impl Processor {
             apr: ix_ctx.apr,
             withdrawal_timelock: ix_ctx.withdrawal_timelock,
             early_withdrawal_fee: ix_ctx.early_withdrawal_fee,
+            lifetime: ix_ctx.lifetime,
         }
 
         metadata.pack_into_slice(metadata_data);
@@ -487,7 +491,7 @@ impl PrintProgramError for ErrorCode {
     {
         match self {
             ErrorCode::InvalidInstruction => msg!("Invalid Instruction."),
-            ErrorCode::RemainingBalance => msg!("Account still has lamports."),
+            ErrorCode::RemainingBalance => msg!("Account has remaining balance."),
         }
     }
 }

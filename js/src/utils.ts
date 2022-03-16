@@ -5,6 +5,7 @@ import * as bip32 from 'bip32';
 import {
 	Keypair,
 	Account,
+	AccountMeta,
 	Connection,
 	Transaction,
 	TransactionInstruction,
@@ -95,12 +96,6 @@ interface VestingEndpoint {
 	metadata: PublicKey,
 	tokenProgram: PublicKey,
 	amount: Numberu64,
-}
-
-interface AccountMeta {
-	pubkey: PublicKey,
-	isSigner: boolean,
-	isWritable: boolean,
 }
 
 const unpackMetadataKeys = (
